@@ -7,7 +7,8 @@ libpldm_sources = files(
   'fru.c',
   'pdr.c',
   'responder.c',
-  'utils.c'
+  'utils.c',
+  'pldm_rde.c',
   )
 
 subdir('requester')

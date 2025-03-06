@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 static int pldm_platform_pdr_hdr_validate(struct pldm_value_pdr_hdr *ctx,
 					  size_t lower, size_t upper)
@@ -373,6 +374,193 @@ int encode_get_pdr_resp(uint8_t instance_id, uint8_t completion_code,
 }
 
 LIBPLDM_ABI_STABLE
+int add_redfish_pdr_to_encoded_get_pdr_resp(
+	uint8_t pdr_header_ver,
+	uint32_t record_handle,
+	uint32_t resource_id,
+	uint16_t record_change_num,
+	const char* sub_uri,
+	uint8_t is_redfish_resource_root,
+	uint8_t is_redfish_resource_collection,
+	uint8_t is_redfish_resource_contained_in_collection,
+	uint32_t containing_resource_id,
+	const char* proposed_containing_resource_name,
+	uint16_t additional_resource_count,
+	struct pldm_msg *msg)
+{
+	if ((msg == NULL) || (sub_uri == NULL) || (proposed_containing_resource_name == NULL)) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	if (is_redfish_resource_root)
+	{
+		if (containing_resource_id != PLDM_EXTERNAL_RESOURCE_ID)
+		{
+			return PLDM_ERROR_INVALID_DATA;
+		}
+
+		// If the containing resource is EXTERNAL, we expect a non-NULL byte
+		if (strcmp(proposed_containing_resource_name, "\0") == 0)
+		{
+			return PLDM_ERROR_INVALID_DATA;
+		}
+
+		// If the containing resource is EXTERNAL, we expect a NULL byte
+		if (strcmp(sub_uri, "\0") != 0)
+		{
+			return PLDM_ERROR_INVALID_DATA;
+		}
+	} else {
+		// If the containing resource is not EXTERNAL, we expect a NULL byte
+		if (strcmp(proposed_containing_resource_name, "\0") != 0)
+		{
+			return PLDM_ERROR_INVALID_DATA;
+		}
+
+		// If the containing resource is EXTERNAL, we do not expect NULL byte
+		if (strcmp(sub_uri, "\0") == 0)
+		{
+			return PLDM_ERROR_INVALID_DATA;
+		}
+	}
+
+	struct pldm_get_pdr_resp *response =
+	    (struct pldm_get_pdr_resp *)msg->payload;
+
+	struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data
+		= (struct pldm_platform_redfish_resource_pdr_data*)
+				((uint8_t*)response->record_data + sizeof(struct pldm_pdr_hdr));
+
+	redfish_pdr_data->resource_id = htole32(resource_id);
+	redfish_pdr_data->resource_flags = 0;
+	redfish_pdr_data->resource_flags |= (is_redfish_resource_root << 0);
+	redfish_pdr_data->resource_flags |= (is_redfish_resource_collection << 1);
+	redfish_pdr_data->resource_flags |= (is_redfish_resource_contained_in_collection << 2);
+	redfish_pdr_data->containing_resource_id = htole32(containing_resource_id);
+
+	uint16_t proposed_containing_resource_length = strlen(proposed_containing_resource_name)
+			+ 1 /* Include the NULL terminator */;
+	redfish_pdr_data->proposed_containing_resource_length = htole16(proposed_containing_resource_length);
+	memcpy(redfish_pdr_data->proposed_containing_resource_name,
+		   proposed_containing_resource_name, proposed_containing_resource_length);
+
+	uint32_t redfish_pdr_data_size = sizeof(struct pldm_platform_redfish_resource_pdr_data) +
+			(uint32_t)proposed_containing_resource_length - sizeof(char);
+	struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+		(struct pldm_platform_redfish_resource_uri_data*)
+			(redfish_pdr_data->proposed_containing_resource_name + proposed_containing_resource_length);
+
+	uint16_t sub_uri_length = strlen(sub_uri) + 1 /* Include the NULL terminator */;
+	first_resource_data->sub_uri_length = htole16(sub_uri_length);
+	memcpy(first_resource_data->sub_uri, sub_uri, sub_uri_length);
+
+	uint32_t first_resource_data_size = (uint32_t)sizeof(sub_uri_length) + (uint32_t)sub_uri_length;
+
+	uint16_t* additional_resource_id_count =
+		(uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+	additional_resource_count = htole16(additional_resource_count);
+	memcpy(additional_resource_id_count, &additional_resource_count, sizeof(additional_resource_count));
+
+	struct pldm_pdr_hdr* pdr_header = (struct pldm_pdr_hdr*) response->record_data;
+
+	pdr_header->record_handle = htole32(record_handle) ;
+	pdr_header->version = pdr_header_ver;
+	pdr_header->type = PLDM_REDFISH_RESOURCE_PDR;
+	pdr_header->record_change_num = htole16(record_change_num);
+	pdr_header->length =
+		htole16(redfish_pdr_data_size + first_resource_data_size +
+		sizeof(uint16_t) /*additional resource count size*/);
+
+	response->response_count = htole16((uint16_t)(sizeof(struct pldm_pdr_hdr) + le16toh(pdr_header->length)));
+
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_STABLE
+int add_additional_redfish_resource_to_encoded_get_pdr_resp(
+	uint32_t sub_resource_id,
+	const char* sub_resource_uri,
+	struct pldm_msg *msg,
+	uint32_t max_pdr_msg_bytes)
+{
+	if ((msg == NULL) || (sub_resource_uri == NULL)) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	struct pldm_get_pdr_resp *response =
+	    (struct pldm_get_pdr_resp *)msg->payload;
+
+	uint32_t total_pdr_bytes = (uint32_t)le16toh(response->response_count);
+
+	uint16_t sub_resource_uri_length = strlen(sub_resource_uri) + 1 /* Include the NULL terminator */;
+	uint32_t additonal_resource_pdr_data_size =
+			sizeof(struct pldm_platform_additional_redfish_resource_pdr_data) +
+				(uint32_t)sub_resource_uri_length - sizeof(char);
+
+	// Check if the next additional redfish resource fits in the response message
+	if ((total_pdr_bytes + additonal_resource_pdr_data_size) > max_pdr_msg_bytes)
+	{
+		return PLDM_ERROR_INVALID_LENGTH;
+	}
+
+	struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data
+		= (struct pldm_platform_redfish_resource_pdr_data*)
+				((uint8_t*)response->record_data + sizeof(struct pldm_pdr_hdr));
+	uint32_t proposed_containing_resource_length = le16toh(redfish_pdr_data->proposed_containing_resource_length);
+
+	struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+		(struct pldm_platform_redfish_resource_uri_data*)
+			(redfish_pdr_data->proposed_containing_resource_name + proposed_containing_resource_length);
+
+	uint16_t sub_uri_length = (uint32_t)le16toh(first_resource_data->sub_uri_length);
+	uint32_t first_resource_data_size = (uint32_t)sizeof(sub_uri_length) + (uint32_t)sub_uri_length;
+
+	uint16_t* additional_resource_id_count =
+		((uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size));
+	uint16_t additional_resource_count = htole16(le16toh(*additional_resource_id_count) + 1);
+	memcpy(additional_resource_id_count, &additional_resource_count, sizeof(additional_resource_count));
+
+	struct pldm_platform_additional_redfish_resource_pdr_data* additonal_resource_pdr_data =
+		(struct pldm_platform_additional_redfish_resource_pdr_data*)
+			((uint8_t*)response->record_data + total_pdr_bytes);
+	additonal_resource_pdr_data->resource_id = htole32(sub_resource_id);
+	additonal_resource_pdr_data->uri_data.sub_uri_length = htole16(sub_resource_uri_length);
+	memcpy(additonal_resource_pdr_data->uri_data.sub_uri, sub_resource_uri, sub_resource_uri_length);
+
+	total_pdr_bytes += additonal_resource_pdr_data_size;
+
+	struct pldm_pdr_hdr* pdr_header = (struct pldm_pdr_hdr*)response->record_data;
+
+	pdr_header->length =
+		htole16(total_pdr_bytes - sizeof(struct pldm_pdr_hdr));
+
+
+	response->response_count = htole16(total_pdr_bytes);
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_STABLE
+int get_encoded_pdr_bytes_from_get_pdr_resp(
+	uint16_t* response_count,
+	struct pldm_msg *msg)
+{
+	if (msg == NULL) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	if (response_count == NULL)
+	{
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	struct pldm_get_pdr_resp *response =
+	    (struct pldm_get_pdr_resp *)msg->payload;
+	*response_count = le16toh(response->response_count);
+
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_STABLE
 int encode_get_pdr_repository_info_resp(
 	uint8_t instance_id, uint8_t completion_code, uint8_t repository_state,
 	const uint8_t *update_time, const uint8_t *oem_update_time,
@@ -551,6 +739,153 @@ int decode_get_pdr_resp(const struct pldm_msg *msg, size_t payload_length,
 
 	return pldm_msgbuf_destroy(buf);
 }
+
+LIBPLDM_ABI_STABLE
+int decode_pdr_header_and_get_record_data(
+	uint8_t* record_data, uint16_t record_length,
+	uint8_t expected_pdr_header_version,
+	uint32_t* record_handle, uint32_t* record_change_number,
+	uint16_t* actual_pdr_byte_count)
+{
+	if ((record_data == NULL) || (record_handle == NULL) ||
+		(record_change_number == NULL) ||
+		(actual_pdr_byte_count == NULL))
+	{
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	struct pldm_pdr_hdr* pdr_header = (struct pldm_pdr_hdr *)record_data;
+
+	if (expected_pdr_header_version != pdr_header->version)
+	{
+		return PLDM_ERROR;
+	}
+
+	if (pdr_header->type != PLDM_REDFISH_RESOURCE_PDR)
+	{
+		return PLDM_ERROR;
+	}
+
+	*actual_pdr_byte_count = le16toh(pdr_header->length);
+
+	// Total record length should not exceed the response size
+	if ((*actual_pdr_byte_count + sizeof(struct pldm_pdr_hdr)) > record_length)
+	{
+		fprintf(stderr, "Total record length %u exceed response size %u\n", (uint32_t)(*actual_pdr_byte_count + sizeof(struct pldm_pdr_hdr)), record_length);
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	*record_handle = le32toh(pdr_header->record_handle);
+	*record_change_number = le32toh(pdr_header->record_change_num);
+
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_STABLE
+int get_redfish_pdr_from_decoded_get_pdr_resp(
+	uint8_t* record_data,
+	uint32_t* resource_id, uint8_t* resource_flags,
+	uint32_t* containing_resource_id,
+	uint16_t* proposed_containing_resource_length,
+	char** proposed_containing_resource_name,
+	uint16_t* resource_uri_length,
+	char** resource_uri,
+	uint16_t* additional_resource_id_count)
+{
+	if ((record_data == NULL) || (resource_id == NULL) ||
+		(resource_flags == NULL) ||
+		(containing_resource_id == NULL) ||
+		(proposed_containing_resource_length == NULL) ||
+		(proposed_containing_resource_name == NULL) ||
+		(resource_uri_length == NULL) || (resource_uri == NULL) ||
+	    (additional_resource_id_count == NULL)) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data
+		= (struct pldm_platform_redfish_resource_pdr_data*) record_data;
+	*resource_id = le32toh(redfish_pdr_data->resource_id);
+	*resource_flags = redfish_pdr_data->resource_flags;
+	*containing_resource_id = le32toh(redfish_pdr_data->containing_resource_id);
+	*proposed_containing_resource_length =
+		le16toh(redfish_pdr_data->proposed_containing_resource_length);
+	*proposed_containing_resource_name = redfish_pdr_data->proposed_containing_resource_name;
+
+	uint16_t redfish_resource_pdr_data_actual_size = sizeof(struct pldm_platform_redfish_resource_pdr_data) -
+		sizeof(char) +  *proposed_containing_resource_length;
+	struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+		(struct pldm_platform_redfish_resource_uri_data*)
+			((uint8_t*)redfish_pdr_data + redfish_resource_pdr_data_actual_size);
+	*resource_uri_length = le16toh(first_resource_data->sub_uri_length);
+	*resource_uri = first_resource_data->sub_uri;
+
+	uint16_t redfish_first_resource_data_actual_size =
+		sizeof(struct pldm_platform_redfish_resource_uri_data) - sizeof(char) + *resource_uri_length;
+	uint16_t* additional_resource_count =
+		(uint16_t*) ((uint8_t*)first_resource_data + redfish_first_resource_data_actual_size);
+	*additional_resource_id_count = le16toh(*(additional_resource_count));
+
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_STABLE
+int get_additional_redfish_resource_from_decoded_get_pdr_resp(
+	uint8_t *record_data,
+	uint16_t resource_index, uint32_t *resource_id,
+	uint16_t* resource_uri_length, char** resource_uri)
+{
+	if ((record_data == NULL) || (resource_id == NULL) ||
+	    (resource_uri_length == NULL) ||
+		(resource_uri == NULL)) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data
+		= (struct pldm_platform_redfish_resource_pdr_data*) record_data;
+
+	uint16_t proposed_containing_resource_length =
+		le16toh(redfish_pdr_data->proposed_containing_resource_length);
+
+	uint16_t redfish_resource_pdr_data_actual_size = sizeof(struct pldm_platform_redfish_resource_pdr_data) -
+		sizeof(char) +  proposed_containing_resource_length;
+
+	struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+		(struct pldm_platform_redfish_resource_uri_data*)
+			((uint8_t*)redfish_pdr_data + redfish_resource_pdr_data_actual_size);
+
+	uint16_t first_resource_uri_length = le16toh(first_resource_data->sub_uri_length);
+
+	uint16_t redfish_first_resource_data_actual_size =
+		sizeof(struct pldm_platform_redfish_resource_uri_data) - sizeof(char) + first_resource_uri_length;
+	uint16_t* additional_resource_count =
+		(uint16_t*) ((uint8_t*)first_resource_data + redfish_first_resource_data_actual_size);
+
+	if (resource_index >= *additional_resource_count)
+	{
+		return PLDM_ERROR_INVALID_DATA;
+	}
+
+	uint8_t* data_ptr =
+		(uint8_t*)
+			((uint8_t*)additional_resource_count + sizeof(uint16_t) /*additional resource count size*/);
+	for (uint16_t id = 0; id < resource_index; id++)
+	{
+		struct pldm_platform_additional_redfish_resource_pdr_data* additional_redfish_resource =
+			(struct pldm_platform_additional_redfish_resource_pdr_data*)(data_ptr);
+		uint16_t additional_resource_uri_length = le16toh(additional_redfish_resource->uri_data.sub_uri_length);
+		data_ptr = data_ptr + sizeof( struct pldm_platform_additional_redfish_resource_pdr_data) -
+				   sizeof(char) + additional_resource_uri_length;
+	}
+
+	struct pldm_platform_additional_redfish_resource_pdr_data* additional_redfish_resource =
+			(struct pldm_platform_additional_redfish_resource_pdr_data*)(data_ptr);
+	*resource_id = le32toh(additional_redfish_resource->resource_id);
+	*resource_uri_length = le16toh(additional_redfish_resource->uri_data.sub_uri_length);
+	*resource_uri = additional_redfish_resource->uri_data.sub_uri;
+
+	return PLDM_SUCCESS;
+}
+
 
 LIBPLDM_ABI_STABLE
 int decode_set_numeric_effecter_value_req(const struct pldm_msg *msg,

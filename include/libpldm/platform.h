@@ -89,6 +89,8 @@ extern "C" {
 #define PLDM_STR_UTF_8_MAX_LEN	256
 #define PLDM_STR_UTF_16_MAX_LEN 256
 
+#define PLDM_EXTERNAL_RESOURCE_ID 0x00000000U
+
 enum pldm_effecter_data_size {
 	PLDM_EFFECTER_DATA_SIZE_UINT8,
 	PLDM_EFFECTER_DATA_SIZE_SINT8,
@@ -1125,6 +1127,27 @@ struct pldm_get_sensor_reading_resp {
 	uint8_t present_reading[1];
 } __attribute__((packed));
 
+struct pldm_platform_redfish_resource_uri_data {
+	// Length includes null terminator
+	uint16_t sub_uri_length;
+	char sub_uri[1];
+} __attribute__((packed));
+
+struct pldm_platform_additional_redfish_resource_pdr_data {
+	uint32_t resource_id;
+	struct pldm_platform_redfish_resource_uri_data uri_data;
+} __attribute__((packed));
+
+struct pldm_platform_redfish_resource_pdr_data {
+	uint32_t resource_id;
+	uint8_t resource_flags;
+	uint32_t containing_resource_id;
+	// Length includes null terminator
+	uint16_t proposed_containing_resource_length;
+	char proposed_containing_resource_name[1];
+
+} __attribute__((packed));
+
 /* Responder */
 
 /* SetNumericEffecterValue */
@@ -1229,6 +1252,61 @@ int encode_get_pdr_resp(uint8_t instance_id, uint8_t completion_code,
 			uint32_t next_data_transfer_hndl, uint8_t transfer_flag,
 			uint16_t resp_cnt, const uint8_t *record_data,
 			uint8_t transfer_crc, struct pldm_msg *msg);
+
+/**
+ * @brief API to add the metadata and first Redfish
+ * resource to GetPDR response
+ *
+ * @param[in] pdr_header_ver - PDR Header version
+ * @param[in] record_handle - Record Handle for the given PDR
+ * @param[in] resource_id - First Resource Id to be added
+ * @param[in] record_change_num - Record change number of the changed PDR
+ * @param[in] sub_uri - Sub uri string
+ * @param[in] is_redfish_resource_root - Flag to indicate if it is a root
+ * resource
+ * @param[in] is_redfish_resource_collection - Flag to indicate if the resource is
+ * a collection
+ * @param[in] is_redfish_resource_contained_in_collection - Flag to indicate
+ * if the resource is contained in a collection
+ * @param[in] containing_resource_id - Resource Id of the containing
+ * resource
+ * @param[in] proposed_containing_resource_name - Proposed containing resource name
+ * @param[in] additional_resource_count - Additional resource count in the Redfish
+ * PDR
+ * @param[out] msg Pointer to PLDM msg container
+ */
+
+int add_redfish_pdr_to_encoded_get_pdr_resp(
+	uint8_t pdr_header_ver, uint32_t record_handle, uint32_t resource_id,
+	uint16_t record_change_num, const char *sub_uri,
+	uint8_t is_redfish_resource_root,
+	uint8_t is_redfish_resource_collection,
+	uint8_t is_redfish_resource_contained_in_collection,
+	uint32_t containing_resource_id,
+	const char *proposed_containing_resource_name,
+	uint16_t additional_resource_count, struct pldm_msg *msg);
+
+/**
+ * @brief API to add additional Redfish resource
+ * to GetPDR response
+ *
+ * @param[in] sub_resource_id - Additional Resource Id to be added
+ * @param[in] sub_resource_uri - Sub resource uri string
+ * @param[out] msg - Pointer to PLDM msg container
+ * @param[in] max_pdr_msg_bytes - Max PDR message bytes
+ */
+int add_additional_redfish_resource_to_encoded_get_pdr_resp(
+	uint32_t sub_resource_id, const char *sub_resource_uri,
+	struct pldm_msg *msg, uint32_t max_pdr_msg_bytes);
+
+/**
+ * @brief API to get the total number of encoded PDR bytes
+ *
+ * @param[out] response_count - Pointer to memory to store pdr byte count
+ * @param[in] msg - Pointer to PLDM msg container
+ */
+int get_encoded_pdr_bytes_from_get_pdr_resp(uint16_t *response_count,
+					    struct pldm_msg *msg);
 
 /** @brief Decode GetPDR request data
  *
@@ -1487,6 +1565,58 @@ int decode_get_pdr_resp(const struct pldm_msg *msg, size_t payload_length,
 			uint8_t *transfer_flag, uint16_t *resp_cnt,
 			uint8_t *record_data, size_t record_data_length,
 			uint8_t *transfer_crc);
+
+/** @brief Decode GetPDR header and record data bytes
+ *
+ *  @param[in] record_data - Array of PDR record bytes
+ *  @param[in] record_length - Total length of record
+ *  @param[in] expected_pdr_header_version - Expected PDR header version
+ *  @param[out] record_handle - Memory to store the record handle of the PDR
+ *  @param[out] record_change_number - Memory to store the record change number
+ *  @param[out] actual_pdr_byte_count - Memory to store the actual pdr byte count
+ *  @return pldm_completion_codes
+ */
+int decode_pdr_header_and_get_record_data(uint8_t *record_data,
+					  uint16_t record_length,
+					  uint8_t expected_pdr_header_version,
+					  uint32_t *record_handle,
+					  uint32_t *record_change_number,
+					  uint16_t *actual_pdr_byte_count);
+
+/** @brief Decode PDR metadata and first redfish resource from PDR record data bytes
+ *
+ *  @param[in] record_data - Array of PDR record bytes
+ *  @param[out] resource_id - Memory to store the first resource id
+ *  @param[out] resource_flags - Memory to store the resource flags
+ *  @param[out] containing_resource_id - Memory to store the containing resource id
+ *  @param[out] proposed_containing_resource_length - Memory to store the containing
+ * resource name length
+ *  @param[out] proposed_containing_resource_name - Memory to store the containing
+ * resource name
+ *  @param[out] resource_uri_length - Memory to store the resource uri length
+ *  @param[out] resource_uri - Memory to store the resource uri name
+ *  @param[out] additional_resource_id_count - Memory to store additional resource id count
+ *  @return pldm_completion_codes
+ */
+int get_redfish_pdr_from_decoded_get_pdr_resp(
+	uint8_t *record_data, uint32_t *resource_id, uint8_t *resource_flags,
+	uint32_t *containing_resource_id,
+	uint16_t *proposed_containing_resource_length,
+	char **proposed_containing_resource_name, uint16_t *resource_uri_length,
+	char **resource_uri, uint16_t *additional_resource_id_count);
+
+/** @brief Decode additional redfish resource from PDR record data bytes
+ *
+ *  @param[in] record_data - Array of PDR record bytes
+ *  @param[in] resource_index - The additional resource index to decode
+ *  @param[out] resource_id - Memory to store the first resource id
+ *  @param[out] resource_uri_length - Memory to store the resource uri length
+ *  @param[out] resource_uri - Memory to store the resource uri name
+ *  @return pldm_completion_codes
+ */
+int get_additional_redfish_resource_from_decoded_get_pdr_resp(
+	uint8_t *record_data, uint16_t resource_index, uint32_t *resource_id,
+	uint16_t *resource_uri_length, char **resource_uri);
 
 /* SetStateEffecterStates */
 

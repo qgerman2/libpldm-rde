@@ -201,6 +201,469 @@ TEST(GetPDR, testBadEncodeResponse)
     EXPECT_EQ(rc, PLDM_ERROR_INVALID_DATA);
 }
 
+TEST(GetPDR, testAdditionOfRedfishPDRToResp)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00080000;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "\0";
+    uint16_t sub_uri_length = strlen(sub_uri) + 1;
+    uint8_t is_redfish_resource_root = 1;
+    uint8_t is_redfish_resource_collection = 1;
+    uint8_t is_redfish_resource_contained_in_collection = 0;
+    uint32_t containing_resource_id = 0x00000000;
+    const char* proposed_containing_resource_name = "Chassis";
+    uint16_t proposed_containing_resource_length =
+        strlen(proposed_containing_resource_name) + 1;
+    uint16_t additional_resource_count = 255;
+    uint8_t test_pldm_msg[2048 + sizeof(struct pldm_pdr_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    // Verify that if input msg is NULL, the API errors out.
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, NULL),
+        PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if input proposed_containing_resource_name is NULL,
+    // the API errors out.
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  sub_uri, is_redfish_resource_root,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  containing_resource_id, NULL, additional_resource_count, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if input sub_uri is NULL, the API errors out.
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num, NULL,
+            is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if is_redfish_resource_root is 1, and the
+    // containing_resource_id is not PLDM_EXTERNAL_RESOURCE_ID, the
+    // API errors out
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  sub_uri, 1 /*is_redfish_resource_root*/,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  0x000040000 /*containing_resource_id*/,
+                  proposed_containing_resource_name, additional_resource_count,
+                  msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if is_redfish_resource_root is 1, and the
+    // proposed_containing_resource_name is a NULL byte, the
+    // API errors out
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  sub_uri, 1 /*is_redfish_resource_root*/,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  PLDM_EXTERNAL_RESOURCE_ID /*containing_resource_id*/,
+                  "\0" /*proposed_containing_resource_name*/,
+                  additional_resource_count, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if is_redfish_resource_root is 0, and the
+    // proposed_containing_resource_name is not a NULL byte, the
+    // API errors out
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  sub_uri, 0 /*is_redfish_resource_root*/,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  0x00004000 /*containing_resource_id*/,
+                  "Chassis" /*proposed_containing_resource_name*/,
+                  additional_resource_count, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if is_redfish_resource_root is 1, and the
+    // sub_uri is not a NULL byte, the API errors out
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  "Chassis" /*sub_uri*/, 1 /*is_redfish_resource_root*/,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  containing_resource_id,
+                  "Chassis" /*proposed_containing_resource_name*/,
+                  additional_resource_count, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that if is_redfish_resource_root is 0, and the
+    // sub_uri is a NULL byte, the API errors out
+    EXPECT_EQ(add_redfish_pdr_to_encoded_get_pdr_resp(
+                  pdr_header_ver, record_handle, resource_id, record_change_num,
+                  "\0" /*sub_uri*/, 1 /*is_redfish_resource_root*/,
+                  is_redfish_resource_collection,
+                  is_redfish_resource_contained_in_collection,
+                  containing_resource_id,
+                  "\0" /*proposed_containing_resource_name*/,
+                  additional_resource_count, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  1
+                                  /*next_record_handle*/,
+                                  0
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+
+    struct pldm_get_pdr_resp* response =
+        (struct pldm_get_pdr_resp*)msg->payload;
+
+    struct pldm_pdr_hdr* pdr_header =
+        (struct pldm_pdr_hdr*)response->record_data;
+
+    EXPECT_EQ(record_handle, le32toh(pdr_header->record_handle));
+    EXPECT_EQ(pdr_header_ver, pdr_header->version);
+    EXPECT_EQ(PLDM_REDFISH_RESOURCE_PDR, pdr_header->type);
+    EXPECT_EQ(record_change_num, le16toh(pdr_header->record_change_num));
+
+    uint32_t redfish_pdr_data_size =
+        sizeof(struct pldm_platform_redfish_resource_pdr_data) +
+        (uint32_t)proposed_containing_resource_length - sizeof(char);
+    uint32_t first_resource_data_size =
+        sizeof(struct pldm_platform_redfish_resource_uri_data) +
+        (uint32_t)sub_uri_length - sizeof(char);
+    uint16_t pdr_length = redfish_pdr_data_size + first_resource_data_size +
+                          sizeof(uint16_t) /*additional
+                          resource count size*/
+        ;
+    EXPECT_EQ(pdr_length, le16toh(pdr_header->length));
+    uint16_t response_length = pdr_length + sizeof(struct pldm_pdr_hdr);
+    EXPECT_EQ(response_length, le16toh(response->response_count));
+
+    struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data =
+        (struct
+         pldm_platform_redfish_resource_pdr_data*)((uint8_t*)
+                                                       response->record_data +
+                                                   sizeof(struct pldm_pdr_hdr));
+
+    EXPECT_EQ(resource_id, le32toh(redfish_pdr_data->resource_id));
+
+    uint8_t resource_flags = (is_redfish_resource_root << 0) |
+                             (is_redfish_resource_collection << 1) |
+                             (is_redfish_resource_contained_in_collection << 2);
+    EXPECT_EQ(resource_flags, redfish_pdr_data->resource_flags);
+    EXPECT_EQ(containing_resource_id,
+              le32toh(redfish_pdr_data->containing_resource_id));
+    EXPECT_EQ(proposed_containing_resource_length,
+              le16toh(redfish_pdr_data->proposed_containing_resource_length));
+    EXPECT_STREQ(proposed_containing_resource_name,
+                 redfish_pdr_data->proposed_containing_resource_name);
+
+    struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+        (struct
+         pldm_platform_redfish_resource_uri_data*)((uint8_t*)redfish_pdr_data +
+                                                   redfish_pdr_data_size);
+    EXPECT_EQ(sub_uri_length, le16toh(first_resource_data->sub_uri_length));
+    EXPECT_STREQ(sub_uri, first_resource_data->sub_uri);
+    uint16_t* additional_resource_id_count =
+        (uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+    EXPECT_EQ(additional_resource_count, *additional_resource_id_count);
+}
+
+TEST(GetPDR, testAdditionOfAdditionalRedfishResourceToPDRResp)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00010001;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "Tray";
+    uint16_t sub_uri_length = strlen(sub_uri) + 1;
+    uint8_t is_redfish_resource_root = 0;
+    uint8_t is_redfish_resource_collection = 0;
+    uint8_t is_redfish_resource_contained_in_collection = 1;
+    uint32_t containing_resource_id = 0x00010000;
+    const char* proposed_containing_resource_name = "\0";
+    uint16_t proposed_containing_resource_length =
+        strlen(proposed_containing_resource_name) + 1;
+    uint16_t additional_resource_count = 0;
+    uint8_t test_pldm_msg[2048 + sizeof(struct pldm_pdr_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    // Verify the API fails if we send NULL sub_resource_uri
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id, NULL, msg, 2048 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify the API fails if we send NULL msg
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id, sub_uri, NULL, 2048 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify the API fails if the data does not fit in the messgae
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id, sub_uri, msg, 1 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_ERROR_INVALID_LENGTH);
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  1
+                                  /*next_record_handle*/,
+                                  0
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+
+    struct pldm_get_pdr_resp* response =
+        (struct pldm_get_pdr_resp*)msg->payload;
+
+    struct pldm_pdr_hdr* pdr_header =
+        (struct pldm_pdr_hdr*)response->record_data;
+
+    EXPECT_EQ(record_handle, le32toh(pdr_header->record_handle));
+    EXPECT_EQ(pdr_header_ver, pdr_header->version);
+    EXPECT_EQ(PLDM_REDFISH_RESOURCE_PDR, pdr_header->type);
+    EXPECT_EQ(record_change_num, le16toh(pdr_header->record_change_num));
+
+    uint32_t redfish_pdr_data_size =
+        sizeof(struct pldm_platform_redfish_resource_pdr_data) +
+        (uint32_t)proposed_containing_resource_length - sizeof(char);
+    uint32_t first_resource_data_size =
+        sizeof(struct pldm_platform_redfish_resource_uri_data) +
+        (uint32_t)sub_uri_length - sizeof(char);
+    uint16_t pdr_length = redfish_pdr_data_size + first_resource_data_size +
+                          sizeof(uint16_t) /*additional
+                          resource count size*/
+        ;
+    EXPECT_EQ(pdr_length, le16toh(pdr_header->length));
+    uint16_t response_length = pdr_length + sizeof(struct pldm_pdr_hdr);
+    EXPECT_EQ(response_length, le16toh(response->response_count));
+
+    struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data =
+        (struct
+         pldm_platform_redfish_resource_pdr_data*)((uint8_t*)
+                                                       response->record_data +
+                                                   sizeof(struct pldm_pdr_hdr));
+
+    EXPECT_EQ(resource_id, le32toh(redfish_pdr_data->resource_id));
+
+    uint8_t resource_flags = (is_redfish_resource_root << 0) |
+                             (is_redfish_resource_collection << 1) |
+                             (is_redfish_resource_contained_in_collection << 2);
+    EXPECT_EQ(resource_flags, redfish_pdr_data->resource_flags);
+    EXPECT_EQ(containing_resource_id,
+              le32toh(redfish_pdr_data->containing_resource_id));
+    EXPECT_EQ(proposed_containing_resource_length,
+              le16toh(redfish_pdr_data->proposed_containing_resource_length));
+    EXPECT_STREQ(proposed_containing_resource_name,
+                 redfish_pdr_data->proposed_containing_resource_name);
+
+    struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+        (struct
+         pldm_platform_redfish_resource_uri_data*)((uint8_t*)redfish_pdr_data +
+                                                   redfish_pdr_data_size);
+    EXPECT_EQ(sub_uri_length, le16toh(first_resource_data->sub_uri_length));
+    EXPECT_STREQ(sub_uri, first_resource_data->sub_uri);
+    uint16_t* additional_resource_id_count =
+        (uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+    EXPECT_EQ(additional_resource_count, *additional_resource_id_count);
+
+    const char* sub_uri1 = "SATA0";
+    uint16_t sub_uri_length1 = strlen(sub_uri1) + 1;
+    uint32_t resource_id1 = 0x00010002;
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id1, sub_uri1, msg, 2048 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_SUCCESS);
+
+    struct pldm_platform_additional_redfish_resource_pdr_data*
+        additonal_resource_pdr_data =
+            (struct
+             pldm_platform_additional_redfish_resource_pdr_data*)((uint8_t*)
+                                                                      additional_resource_id_count +
+                                                                  sizeof(
+                                                                      uint16_t));
+    EXPECT_EQ(resource_id1, le32toh(additonal_resource_pdr_data->resource_id));
+    EXPECT_EQ(sub_uri_length1,
+              le16toh(additonal_resource_pdr_data->uri_data.sub_uri_length));
+    EXPECT_STREQ(sub_uri1, additonal_resource_pdr_data->uri_data.sub_uri);
+
+    uint32_t additonal_resource_pdr_data_size =
+        sizeof(struct pldm_platform_additional_redfish_resource_pdr_data) +
+        (uint32_t)sub_uri_length1 - sizeof(char);
+    uint16_t total_pdr_bytes = sizeof(struct pldm_pdr_hdr) + pdr_length +
+                               additonal_resource_pdr_data_size;
+    additional_resource_id_count =
+        (uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+    EXPECT_EQ(additional_resource_count + 1,
+              le16toh(*additional_resource_id_count));
+    EXPECT_EQ(total_pdr_bytes, le16toh(response->response_count));
+}
+
+TEST(GetPDR, testGetEncodedPDRBytesFromGetPDRResp)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00040001;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "brick_p12v_temp";
+    uint16_t sub_uri_length = strlen(sub_uri) + 1;
+    uint8_t is_redfish_resource_root = 0;
+    uint8_t is_redfish_resource_collection = 0;
+    uint8_t is_redfish_resource_contained_in_collection = 1;
+    uint32_t containing_resource_id = 0x00040000;
+    const char* proposed_containing_resource_name = "\0";
+    uint16_t proposed_containing_resource_length =
+        strlen(proposed_containing_resource_name) + 1;
+    uint16_t additional_resource_count = 0;
+    uint8_t test_pldm_msg[2048 + sizeof(struct pldm_pdr_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    // Verify that the API fails if response counter pointer in NULL
+    EXPECT_EQ(get_encoded_pdr_bytes_from_get_pdr_resp(NULL, msg),
+              PLDM_ERROR_INVALID_DATA);
+
+    uint16_t response_count = 0;
+    // Verify that the API fails if msg  pointer in NULL
+    EXPECT_EQ(get_encoded_pdr_bytes_from_get_pdr_resp(&response_count, NULL),
+              PLDM_ERROR_INVALID_DATA);
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  1
+                                  /*next_record_handle*/,
+                                  0
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+
+    struct pldm_get_pdr_resp* response =
+        (struct pldm_get_pdr_resp*)msg->payload;
+
+    struct pldm_pdr_hdr* pdr_header =
+        (struct pldm_pdr_hdr*)response->record_data;
+
+    EXPECT_EQ(record_handle, le32toh(pdr_header->record_handle));
+    EXPECT_EQ(pdr_header_ver, pdr_header->version);
+    EXPECT_EQ(PLDM_REDFISH_RESOURCE_PDR, pdr_header->type);
+    EXPECT_EQ(record_change_num, le16toh(pdr_header->record_change_num));
+
+    uint32_t redfish_pdr_data_size =
+        sizeof(struct pldm_platform_redfish_resource_pdr_data) +
+        (uint32_t)proposed_containing_resource_length - sizeof(char);
+    uint32_t first_resource_data_size =
+        sizeof(struct pldm_platform_redfish_resource_uri_data) +
+        (uint32_t)sub_uri_length - sizeof(char);
+    uint16_t pdr_length = redfish_pdr_data_size + first_resource_data_size +
+                          sizeof(uint16_t) /*additional
+                          resource count size*/
+        ;
+    EXPECT_EQ(pdr_length, le16toh(pdr_header->length));
+    uint16_t response_length = pdr_length + sizeof(struct pldm_pdr_hdr);
+    EXPECT_EQ(response_length, le16toh(response->response_count));
+
+    struct pldm_platform_redfish_resource_pdr_data* redfish_pdr_data =
+        (struct
+         pldm_platform_redfish_resource_pdr_data*)((uint8_t*)
+                                                       response->record_data +
+                                                   sizeof(struct pldm_pdr_hdr));
+
+    EXPECT_EQ(resource_id, le32toh(redfish_pdr_data->resource_id));
+
+    uint8_t resource_flags = (is_redfish_resource_root << 0) |
+                             (is_redfish_resource_collection << 1) |
+                             (is_redfish_resource_contained_in_collection << 2);
+    EXPECT_EQ(resource_flags, redfish_pdr_data->resource_flags);
+    EXPECT_EQ(containing_resource_id,
+              le32toh(redfish_pdr_data->containing_resource_id));
+    EXPECT_EQ(proposed_containing_resource_length,
+              le16toh(redfish_pdr_data->proposed_containing_resource_length));
+    EXPECT_STREQ(proposed_containing_resource_name,
+                 redfish_pdr_data->proposed_containing_resource_name);
+
+    struct pldm_platform_redfish_resource_uri_data* first_resource_data =
+        (struct
+         pldm_platform_redfish_resource_uri_data*)((uint8_t*)redfish_pdr_data +
+                                                   redfish_pdr_data_size);
+    EXPECT_EQ(sub_uri_length, le16toh(first_resource_data->sub_uri_length));
+    EXPECT_STREQ(sub_uri, first_resource_data->sub_uri);
+    uint16_t* additional_resource_id_count =
+        (uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+    EXPECT_EQ(additional_resource_count, *additional_resource_id_count);
+
+    const char* sub_uri1 = "vol_p3v3_aux_scaled";
+    uint16_t sub_uri_length1 = strlen(sub_uri1) + 1;
+    uint32_t resource_id1 = 0x00040002;
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id1, sub_uri1, msg, 2048 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_SUCCESS);
+
+    struct pldm_platform_additional_redfish_resource_pdr_data*
+        additonal_resource_pdr_data =
+            (struct
+             pldm_platform_additional_redfish_resource_pdr_data*)((uint8_t*)
+                                                                      additional_resource_id_count +
+                                                                  sizeof(
+                                                                      uint16_t));
+    EXPECT_EQ(resource_id1, le32toh(additonal_resource_pdr_data->resource_id));
+    EXPECT_EQ(sub_uri_length1,
+              le16toh(additonal_resource_pdr_data->uri_data.sub_uri_length));
+    EXPECT_STREQ(sub_uri1, additonal_resource_pdr_data->uri_data.sub_uri);
+
+    uint32_t additonal_resource_pdr_data_size =
+        sizeof(struct pldm_platform_additional_redfish_resource_pdr_data) +
+        (uint32_t)sub_uri_length1 - sizeof(char);
+    uint16_t total_pdr_bytes = sizeof(struct pldm_pdr_hdr) + pdr_length +
+                               additonal_resource_pdr_data_size;
+    additional_resource_id_count =
+        (uint16_t*)((uint8_t*)first_resource_data + first_resource_data_size);
+    EXPECT_EQ(additional_resource_count + 1,
+              le16toh(*additional_resource_id_count));
+    EXPECT_EQ(total_pdr_bytes, le16toh(response->response_count));
+
+    EXPECT_EQ(get_encoded_pdr_bytes_from_get_pdr_resp(&response_count, msg),
+              PLDM_SUCCESS);
+    EXPECT_EQ(total_pdr_bytes, response_count);
+}
+
 TEST(GetPDR, testGoodDecodeRequest)
 {
     std::array<uint8_t, hdrSize + PLDM_GET_PDR_REQ_BYTES> requestMsg{};
@@ -385,6 +848,441 @@ TEST(GetPDR, testBadDecodeResponse)
         &retNextRecordHndl, &retNextDataTransferHndl, &retTransferFlag,
         &retRespCnt, retRecordData, recordDataLength, &retTransferCRC);
     EXPECT_EQ(rc, PLDM_ERROR_INVALID_LENGTH);
+}
+
+TEST(GetPDR, testDecodePdrHeaderAndGetRecordData)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00040001;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "brick_p12v_temp";
+    uint8_t is_redfish_resource_root = 0;
+    uint8_t is_redfish_resource_collection = 0;
+    uint8_t is_redfish_resource_contained_in_collection = 1;
+    uint32_t containing_resource_id = 0x00040000;
+    const char* proposed_containing_resource_name = "\0";
+    uint16_t additional_resource_count = 0;
+    uint8_t test_pldm_msg[2048 + sizeof(pldm_msg_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  record_handle + 1
+                                  /*next_record_handle*/,
+                                  1
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+    struct pldm_get_pdr_resp* response =
+        (struct pldm_get_pdr_resp*)msg->payload;
+
+    uint16_t total_pdr_bytes = le16toh(response->response_count);
+
+    uint8_t completion_code = 0;
+    uint32_t next_record_hndl = 0;
+    uint32_t next_data_transfer_hndl = 0;
+    uint8_t transfer_flag = 0;
+    uint16_t resp_cnt = 0;
+    size_t record_data_length = 2048 - PLDM_GET_PDR_MIN_RESP_BYTES;
+    uint8_t transfer_crc;
+    uint8_t record_data_read[2048 - PLDM_GET_PDR_MIN_RESP_BYTES] = {0};
+    EXPECT_EQ(decode_get_pdr_resp(msg, 2048 + sizeof(pldm_msg_hdr),
+                                  &completion_code, &next_record_hndl,
+                                  &next_data_transfer_hndl, &transfer_flag,
+                                  &resp_cnt, record_data_read,
+                                  record_data_length, &transfer_crc),
+              PLDM_SUCCESS);
+    EXPECT_EQ(completion_code, PLDM_SUCCESS);
+    EXPECT_EQ(next_record_hndl, record_handle + 1);
+    EXPECT_EQ(next_data_transfer_hndl, 1);
+    EXPECT_EQ(transfer_flag, PLDM_START_AND_END);
+    EXPECT_EQ(resp_cnt, total_pdr_bytes);
+    EXPECT_EQ(transfer_crc, 0);
+
+    uint32_t record_handle_read = 0;
+    uint32_t record_change_number_read = 0;
+    uint16_t actual_pdr_byte_count_read = 0;
+
+    // Verify that the APIs fails if record_data is NULL
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  NULL, resp_cnt, pdr_header_ver, &record_handle_read,
+                  &record_change_number_read, &actual_pdr_byte_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the APIs fails if record_hande is NULL
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver, NULL,
+                  &record_change_number_read, &actual_pdr_byte_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the APIs fails if record_change_number is NULL
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver, &record_handle,
+                  NULL, &actual_pdr_byte_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the APIs fails if actual_pdr_byte_count_read is NULL
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver, &record_handle,
+                  &record_change_number_read, NULL),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if PDR Header version is not expected.
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt,
+                  3
+                  /*expected_pdr_header_version*/,
+                  &record_handle_read, &record_change_number_read,
+                  &actual_pdr_byte_count_read),
+              PLDM_ERROR);
+
+    // Verify that the API fails if record length is small.
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, 1 /*record_length*/, pdr_header_ver,
+                  &record_handle_read, &record_change_number_read,
+                  &actual_pdr_byte_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver,
+                  &record_handle_read, &record_change_number_read,
+                  &actual_pdr_byte_count_read),
+              PLDM_SUCCESS);
+    EXPECT_EQ(record_handle_read, record_handle);
+    EXPECT_EQ(record_change_number_read, record_change_num);
+    EXPECT_EQ(actual_pdr_byte_count_read,
+              total_pdr_bytes - sizeof(struct pldm_pdr_hdr));
+}
+
+TEST(GetPDR, testGetRedfishPDRFromDecodedGetPdrResp)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00040001;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "brick_p12v_temp";
+    uint16_t sub_uri_length = strlen(sub_uri) + 1;
+    uint8_t is_redfish_resource_root = 0;
+    uint8_t is_redfish_resource_collection = 0;
+    uint8_t is_redfish_resource_contained_in_collection = 1;
+    uint32_t containing_resource_id = 0x00040000;
+    const char* proposed_containing_resource_name = "\0";
+    uint16_t proposed_containing_resource_length =
+        strlen(proposed_containing_resource_name) + 1;
+    uint16_t additional_resource_count = 0;
+    uint8_t test_pldm_msg[2048 + sizeof(pldm_msg_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  record_handle + 1
+                                  /*next_record_handle*/,
+                                  1
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+
+    uint8_t completion_code = 0;
+    uint32_t next_record_hndl = 0;
+    uint32_t next_data_transfer_hndl = 0;
+    uint8_t transfer_flag = 0;
+    uint16_t resp_cnt = 0;
+    size_t record_data_length = 2048 - PLDM_GET_PDR_MIN_RESP_BYTES;
+    uint8_t transfer_crc;
+    uint8_t record_data_read[2048 - PLDM_GET_PDR_MIN_RESP_BYTES] = {0};
+    EXPECT_EQ(decode_get_pdr_resp(msg, 2048 + sizeof(pldm_msg_hdr),
+                                  &completion_code, &next_record_hndl,
+                                  &next_data_transfer_hndl, &transfer_flag,
+                                  &resp_cnt, record_data_read,
+                                  record_data_length, &transfer_crc),
+              PLDM_SUCCESS);
+    EXPECT_EQ(completion_code, PLDM_SUCCESS);
+
+    uint32_t record_handle_read = 0;
+    uint32_t record_change_number_read = 0;
+    uint16_t actual_pdr_byte_count_read = 0;
+
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver,
+                  &record_handle_read, &record_change_number_read,
+                  &actual_pdr_byte_count_read),
+              PLDM_SUCCESS);
+    uint8_t* actual_pdr_record_data_read =
+        record_data_read + sizeof(pldm_pdr_hdr);
+    uint32_t resource_id_read = 0x00000000;
+    uint8_t resource_flags_read = 0;
+    uint32_t containing_resource_id_read = 0;
+    uint16_t proposed_containing_resource_length_read = 0;
+    char* proposed_containing_resource_name_read = NULL;
+    uint16_t resource_uri_length_read = 0;
+    char* resource_uri_read = NULL;
+    uint16_t additional_resource_id_count_read = 0;
+
+    // Verify that the API fails if input record data is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  NULL, &resource_id_read, &resource_flags_read,
+                  &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input resource id pointer is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, NULL, &resource_flags_read,
+                  &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input resource flags pointer is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read, NULL,
+                  &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input containing resource id pointer is
+    // NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, NULL,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input proposed containing resource length
+    // pointer is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read, NULL,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input proposed containing resource name
+    // is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read, NULL,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input resource uri length is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read, NULL,
+                  &resource_uri_read, &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if input resource uri pointer is NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, NULL,
+                  &additional_resource_id_count_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that the API fails if additional resource id count pointer is
+    // NULL
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read, NULL),
+              PLDM_ERROR_INVALID_DATA);
+
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(resource_id, resource_id_read);
+    EXPECT_EQ(resource_flags_read,
+              ((is_redfish_resource_root << 0) |
+               (is_redfish_resource_collection << 1) |
+               (is_redfish_resource_contained_in_collection << 2)));
+    EXPECT_EQ(containing_resource_id_read, containing_resource_id);
+    EXPECT_EQ(proposed_containing_resource_length_read,
+              proposed_containing_resource_length);
+    EXPECT_STREQ(proposed_containing_resource_name_read,
+                 proposed_containing_resource_name);
+    EXPECT_EQ(resource_uri_length_read, sub_uri_length);
+    EXPECT_STREQ(resource_uri_read, sub_uri);
+    EXPECT_EQ(additional_resource_id_count_read, 0);
+}
+
+TEST(GetPDR, testGetAdditionalRedfishResourceFromDecodedGetPdrResp)
+{
+    uint8_t pdr_header_ver = 2;
+    uint32_t record_handle = 50;
+    uint32_t resource_id = 0x00040001;
+    uint16_t record_change_num = 12;
+    const char* sub_uri = "brick_p12v_temp";
+    uint8_t is_redfish_resource_root = 0;
+    uint8_t is_redfish_resource_collection = 0;
+    uint8_t is_redfish_resource_contained_in_collection = 1;
+    uint32_t containing_resource_id = 0x00040000;
+    const char* proposed_containing_resource_name = "\0";
+    uint16_t additional_resource_count = 0;
+    uint8_t test_pldm_msg[2048 + sizeof(pldm_msg_hdr)] = {0};
+    struct pldm_msg* msg = (struct pldm_msg*)test_pldm_msg;
+
+    EXPECT_EQ(encode_get_pdr_resp(1 /*instance_id*/, PLDM_SUCCESS,
+                                  record_handle + 1
+                                  /*next_record_handle*/,
+                                  1
+                                  /*next_data_transfer_handle*/,
+                                  PLDM_START_AND_END, 0 /*resp_cnt*/,
+                                  NULL
+                                  /*record_data*/,
+                                  0 /*transfer_crc*/, msg),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(
+        add_redfish_pdr_to_encoded_get_pdr_resp(
+            pdr_header_ver, record_handle, resource_id, record_change_num,
+            sub_uri, is_redfish_resource_root, is_redfish_resource_collection,
+            is_redfish_resource_contained_in_collection, containing_resource_id,
+            proposed_containing_resource_name, additional_resource_count, msg),
+        PLDM_SUCCESS);
+
+    const char* sub_uri1 = "vol_p3v3_aux_scaled";
+    uint16_t sub_uri_length1 = strlen(sub_uri1) + 1;
+    uint32_t resource_id1 = 0x00040002;
+    EXPECT_EQ(add_additional_redfish_resource_to_encoded_get_pdr_resp(
+                  resource_id1, sub_uri1, msg, 2048 /*max_pdr_msg_bytes*/
+                  ),
+              PLDM_SUCCESS);
+
+    uint8_t completion_code = 0;
+    uint32_t next_record_hndl = 0;
+    uint32_t next_data_transfer_hndl = 0;
+    uint8_t transfer_flag = 0;
+    uint16_t resp_cnt = 0;
+    size_t record_data_length = 2048 - PLDM_GET_PDR_MIN_RESP_BYTES;
+    uint8_t transfer_crc;
+    uint8_t record_data_read[2048 - PLDM_GET_PDR_MIN_RESP_BYTES] = {0};
+    EXPECT_EQ(decode_get_pdr_resp(msg, 2048 + sizeof(pldm_msg_hdr),
+                                  &completion_code, &next_record_hndl,
+                                  &next_data_transfer_hndl, &transfer_flag,
+                                  &resp_cnt, record_data_read,
+                                  record_data_length, &transfer_crc),
+              PLDM_SUCCESS);
+
+    uint32_t record_handle_read = 0;
+    uint32_t record_change_number_read = 0;
+    uint16_t actual_pdr_byte_count_read = 0;
+
+    EXPECT_EQ(decode_pdr_header_and_get_record_data(
+                  record_data_read, resp_cnt, pdr_header_ver,
+                  &record_handle_read, &record_change_number_read,
+                  &actual_pdr_byte_count_read),
+              PLDM_SUCCESS);
+
+    uint8_t* actual_pdr_record_data_read =
+        record_data_read + sizeof(pldm_pdr_hdr);
+    uint32_t resource_id_read = 0x00000000;
+    uint8_t resource_flags_read = 0;
+    uint32_t containing_resource_id_read = 0;
+    uint16_t proposed_containing_resource_length_read = 0;
+    char* proposed_containing_resource_name_read = NULL;
+    uint16_t resource_uri_length_read = 0;
+    char* resource_uri_read = NULL;
+    uint16_t additional_resource_id_count_read = 0;
+
+    EXPECT_EQ(get_redfish_pdr_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, &resource_id_read,
+                  &resource_flags_read, &containing_resource_id_read,
+                  &proposed_containing_resource_length_read,
+                  &proposed_containing_resource_name_read,
+                  &resource_uri_length_read, &resource_uri_read,
+                  &additional_resource_id_count_read),
+              PLDM_SUCCESS);
+
+    uint32_t resource_id1_read = 0;
+    uint16_t sub_uri_length1_read = 0;
+    char* sub_uri1_read = NULL;
+
+    // Verify that API fails if record data pointer is NULL
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  NULL /*record_data*/, 0, &resource_id1_read,
+                  &sub_uri_length1_read, &sub_uri1_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that API fails if resource id pointer is NULL
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, 0, NULL /*resource_id*/,
+                  &sub_uri_length1_read, &sub_uri1_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that API fails if resource uri length pointer is NULL
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, 0, &resource_id1_read,
+                  NULL /*resource_uri_length*/, &sub_uri1_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that API fails if resource uri pointer is NULL
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, 0, &resource_id1_read,
+                  &sub_uri_length1_read, NULL /*resource_uri*/),
+              PLDM_ERROR_INVALID_DATA);
+
+    // Verify that API fails if resource index is out of range
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, 100, &resource_id1_read,
+                  &sub_uri_length1_read, &sub_uri1_read),
+              PLDM_ERROR_INVALID_DATA);
+
+    EXPECT_EQ(get_additional_redfish_resource_from_decoded_get_pdr_resp(
+                  actual_pdr_record_data_read, 0, &resource_id1_read,
+                  &sub_uri_length1_read, &sub_uri1_read),
+              PLDM_SUCCESS);
+
+    EXPECT_EQ(resource_id1, resource_id1_read);
+    EXPECT_EQ(sub_uri_length1, sub_uri_length1_read);
+    EXPECT_STREQ(sub_uri1, sub_uri1_read);
 }
 
 TEST(GetPDRRepositoryInfo, testGoodEncodeResponse)
